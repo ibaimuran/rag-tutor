@@ -1,0 +1,14 @@
+services:
+  rag-tutor:
+    build: .
+    container_name: rag-tutor
+    ports:
+      - "8000:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    volumes:
+      - tutor_data:/app/backend/data
+    restart: unless-stopped
+
+volumes:
+  tutor_data:

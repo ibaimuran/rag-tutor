@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Tutor - 开始学习</title>
+<link rel="stylesheet" href="/static/css/main.css">
+<link rel="stylesheet" href="/static/css/landing.css">
+</head>
+<body>
+<div class="landing-layout">
+  <!-- Left Sidebar: Existing Courses -->
+  <aside id="courses-sidebar">
+    <div class="courses-sidebar-header">
+      <h2>已有课程</h2>
+      <span class="courses-count" id="courses-count"></span>
+    </div>
+    <div id="courses-nav">
+      <p class="courses-loading">加载中...</p>
+    </div>
+    <div id="courses-empty" class="hidden">
+      <p class="courses-empty-text">暂无课程，在右侧输入主题创建第一个课程</p>
+    </div>
+  </aside>
+
+  <!-- Right Main: Topic Input -->
+  <main class="landing-main">
+    <div class="landing-hero">
+      <h1>你好，今天想学什么？</h1>
+      <p class="landing-subtitle">基于 Bloom 2-Sigma 掌握式学习理论，AI 私教带你系统掌握任何知识</p>
+    </div>
+
+    <div class="landing-input-area">
+      <input type="text" id="topic-input"
+             placeholder="例如：初中化学、初中物理、初中数学、Python编程、提示词工程..."
+             autocomplete="off" autofocus>
+      <button id="start-btn">开始学习</button>
+    </div>
+
+    <div id="generation-progress" class="hidden">
+      <div class="spinner"></div>
+      <p class="progress-title">正在为你生成课程...</p>
+      <p id="progress-detail" class="progress-detail"></p>
+    </div>
+
+    <div class="landing-examples">
+      <p class="examples-label">试试这些主题：</p>
+      <div class="examples-row">
+        <button class="example-chip" data-topic="初中化学">初中化学</button>
+        <button class="example-chip" data-topic="初中物理">初中物理</button>
+        <button class="example-chip" data-topic="初中数学">初中数学</button>
+        <button class="example-chip" data-topic="Python编程入门">Python编程入门</button>
+        <button class="example-chip" data-topic="提示词工程">提示词工程</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="/static/js/landing.js"></script>
+</body>
+</html>

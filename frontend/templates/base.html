@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Tutor - 课程知识私教助手</title>
+<link rel="stylesheet" href="/static/css/main.css">
+<link rel="stylesheet" href="/static/css/chat.css">
+<link rel="stylesheet" href="/static/css/quiz.css">
+<link rel="stylesheet" href="/static/css/roadmap.css">
+</head>
+<body>
+<div id="app">
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <a href="/" class="back-home-link" title="返回首页">← 返回首页</a>
+      <div class="sidebar-title-row">
+        <h2 id="course-title">加载中...</h2>
+        <div class="progress-mini">
+        <svg viewBox="0 0 60 60">
+          <defs><linearGradient id="pg-mini" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="var(--accent-1)"/>
+            <stop offset="100%" stop-color="var(--accent-2)"/>
+          </linearGradient></defs>
+          <circle cx="30" cy="30" r="26" fill="none" stroke="var(--border)" stroke-width="4"/>
+          <circle id="progress-circle" cx="30" cy="30" r="26" fill="none"
+            stroke="url(#pg-mini)" stroke-width="4" stroke-linecap="round"
+            stroke-dasharray="163.4" stroke-dashoffset="163.4"
+            style="transform:rotate(-90deg);transform-origin:center"/>
+        </svg>
+        <span id="progress-text">0%</span>
+      </div>
+      </div>
+    </div>
+    <!-- Course Switcher -->
+    <div id="course-switcher" class="course-switcher hidden">
+      <div class="course-switcher-header">
+        <span>课程列表</span>
+        <button id="course-switcher-toggle" class="cs-toggle-btn">▲</button>
+      </div>
+      <div id="course-switcher-list" class="course-switcher-list"></div>
+    </div>
+    <nav id="roadmap-nav"></nav>
+  </aside>
+
+  <!-- Main -->
+  <main id="chat-area">
+    <div id="chat-header">
+      <span id="current-concept">选择左侧知识点开始学习</span>
+      <div class="mode-tabs">
+        <button id="mode-read-btn" class="mode-tab active">阅读</button>
+        <button id="mode-chat-btn" class="mode-tab">对话</button>
+        <button id="mode-quiz-btn" class="mode-tab">测验</button>
+      </div>
+      <span id="phase-badge" class="badge idle">待命中</span>
+    </div>
+
+    <!-- Reading Mode Panel -->
+    <div id="reading-panel" class="mode-panel">
+      <div id="kp-content" class="markdown-content">
+        <p class="placeholder-text">在左侧选择一个知识点开始阅读教材内容</p>
+      </div>
+    </div>
+
+    <!-- Q&A Mode Panel -->
+    <div id="qa-panel" class="mode-panel hidden">
+      <div id="quiz-container"></div>
+      <div id="chat-messages"></div>
+      <div id="chat-input-area">
+        <textarea id="chat-input" placeholder="输入你的回答..." rows="2"></textarea>
+        <button id="send-btn">发送</button>
+      </div>
+    </div>
+
+    <!-- Mastery Gate Indicator -->
+    <div id="mastery-indicator" class="hidden"></div>
+
+    <button id="test-start-btn" class="test-start hidden">开始章节测试</button>
+  </main>
+
+  <!-- Test Panel (hidden) -->
+  <aside id="test-panel" class="hidden">
+    <div class="test-header">
+      <h3>章节测试</h3>
+      <button id="test-close-btn">✕</button>
+    </div>
+    <div id="test-questions"></div>
+    <div id="test-result" class="hidden"></div>
+    <button id="test-submit-btn" class="test-submit">提交测试</button>
+  </aside>
+</div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/roadmap.js"></script>
+<script src="/static/js/chat.js"></script>
+<script src="/static/js/quiz.js"></script>
+<script src="/static/js/testing.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

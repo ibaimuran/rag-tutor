@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+.env
+backend/data/tutor.db
+backend/data/chroma_db
+backend/data/materials
+.git
+*.md
