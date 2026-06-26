@@ -1,10 +1,9 @@
 from pathlib import Path
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import APIRouter, Depends
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session as DbSession
 from ...api.deps import get_db
 from ...roadmap.builder import RoadmapBuilder
-from ...roadmap.renderer import RoadmapRenderer
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["roadmap"])
 
@@ -19,20 +18,6 @@ async def get_roadmap(session_id: int, db: DbSession = Depends(get_db)):
 
     builder = RoadmapBuilder(db)
     return builder.build(session.user_id, session.course_id)
-
-
-@router.get("/{session_id}/roadmap/html", response_class=HTMLResponse)
-async def get_roadmap_html(session_id: int, db: DbSession = Depends(get_db)):
-    from ...core.session_manager import SessionManager
-    sm = SessionManager(db)
-    session = sm.get_session(session_id)
-    if not session:
-        return "<p>Session not found</p>"
-
-    builder = RoadmapBuilder(db)
-    data = builder.build(session.user_id, session.course_id)
-    renderer = RoadmapRenderer()
-    return renderer.render_roadmap(data)
 
 
 @router.get("/knowledge-points/{kp_id}/content")

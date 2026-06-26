@@ -8,6 +8,7 @@ Flow:
 
 import json
 import re
+from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session as DbSession
 
@@ -167,19 +168,20 @@ async def answer_quiz_question(
         return {"error": "All questions already answered"}
 
     current_q = questions[idx]
-    correct_answer = current_q.get("correct_answer", "").strip().upper()
+    correct_answer = (current_q.get("correct_answer") or "").strip().upper()
     user_answer = answer.strip().upper()
     is_correct = user_answer == correct_answer
 
-    # Update BKT
+    # Update BKT（所有参数确保非 None）
+    bp = quiz.bkt_params_json or {}
     bkt_params = BKTParams(
-        p_l0=quiz.bkt_params_json.get("p_l0", 0.50) if quiz.bkt_params_json else 0.50,
-        p_t=quiz.bkt_params_json.get("p_t", 0.20) if quiz.bkt_params_json else 0.20,
-        p_g=quiz.bkt_params_json.get("p_g", 0.15) if quiz.bkt_params_json else 0.15,
-        p_s=quiz.bkt_params_json.get("p_s", 0.10) if quiz.bkt_params_json else 0.10,
+        p_l0=bp.get("p_l0") or 0.50,
+        p_t=bp.get("p_t") or 0.20,
+        p_g=bp.get("p_g") or 0.15,
+        p_s=bp.get("p_s") or 0.10,
     )
-    current_p_know = quiz.end_p_know if quiz.end_p_know is not None else quiz.start_p_know
-    bkt_state = BKTState(params=bkt_params, p_know=current_p_know)
+    raw_p_know = quiz.end_p_know if quiz.end_p_know is not None else (quiz.start_p_know or 0.50)
+    bkt_state = BKTState(params=bkt_params, p_know=raw_p_know or 0.50)
     bkt_state = update_bkt_posterior(bkt_state, is_correct)
 
     # Record answer
@@ -200,6 +202,7 @@ async def answer_quiz_question(
     # Check if quiz is complete
     if quiz.current_index >= len(questions):
         quiz.status = "completed"
+        quiz.completed_at = datetime.now()
         db.commit()
         db.refresh(quiz)
 
@@ -256,22 +259,22 @@ async def get_quiz_result(session_id: int, quiz_id: int, db: DbSession = Depends
     answers = quiz.answers_json or []
 
     if quiz.status != "completed":
-        # Compute current BKT
+        bp = quiz.bkt_params_json or {}
         bkt_params = BKTParams(
-            p_l0=quiz.bkt_params_json.get("p_l0", 0.50) if quiz.bkt_params_json else 0.50,
-            p_t=quiz.bkt_params_json.get("p_t", 0.20) if quiz.bkt_params_json else 0.20,
-            p_g=quiz.bkt_params_json.get("p_g", 0.15) if quiz.bkt_params_json else 0.15,
-            p_s=quiz.bkt_params_json.get("p_s", 0.10) if quiz.bkt_params_json else 0.10,
+            p_l0=bp.get("p_l0") or 0.50,
+            p_t=bp.get("p_t") or 0.20,
+            p_g=bp.get("p_g") or 0.15,
+            p_s=bp.get("p_s") or 0.10,
         )
-        current_p_know = quiz.end_p_know if quiz.end_p_know is not None else quiz.start_p_know
-        bkt_state = BKTState(params=bkt_params, p_know=current_p_know)
+        current_p_know = quiz.end_p_know if quiz.end_p_know is not None else (quiz.start_p_know or 0.50)
+        bkt_state = BKTState(params=bkt_params, p_know=current_p_know or 0.50)
         return {
             "completed": False,
             "progress": {
                 "answered": len(answers),
                 "total": len(questions),
             },
-            "current_p_know": round(bkt_state.p_know * 100),
+            "current_p_know": round((bkt_state.p_know or 0.50) * 100),
         }
 
     # Build final result
@@ -279,7 +282,7 @@ async def get_quiz_result(session_id: int, quiz_id: int, db: DbSession = Depends
     total = len(answers)
     accuracy = correct_count / max(total, 1) * 100
 
-    p_know = quiz.end_p_know or quiz.start_p_know
+    p_know = quiz.end_p_know or quiz.start_p_know or 0.50
     pct = round(p_know * 100)
     status = _compute_mastery_status(BKTState(p_know=p_know))
 
@@ -303,7 +306,7 @@ async def get_quiz_result(session_id: int, quiz_id: int, db: DbSession = Depends
         "total_questions": total,
         "correct_count": correct_count,
         "accuracy_pct": round(accuracy),
-        "p_know_start": round(quiz.start_p_know * 100),
+        "p_know_start": round((quiz.start_p_know or 0.50) * 100),
         "p_know_end": pct,
         "mastery_status": status,
         "assessment": assessment,
@@ -423,7 +426,7 @@ def _format_quiz_complete(quiz: QuizAttempt, bkt_state: BKTState) -> dict:
         "total_questions": total,
         "correct_count": correct_count,
         "accuracy_pct": round(correct_count / max(total, 1) * 100),
-        "p_know_start": round(quiz.start_p_know * 100),
+        "p_know_start": round((quiz.start_p_know or 0.50) * 100),
         "p_know_end": pct,
         "mastery_status": status,
         "assessment": assessment,

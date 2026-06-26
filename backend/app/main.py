@@ -19,9 +19,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Create data directory
-    Path(settings.database_url.replace("sqlite:///", "")).parent.mkdir(parents=True, exist_ok=True)
+    # 创建数据目录（使用绝对路径，确保 Docker 和本地运行一致）
+    data_dir = Path(settings.database_url.replace("sqlite:///", "")).parent
+    data_dir.mkdir(parents=True, exist_ok=True)
     Path(settings.chroma_persist_path).mkdir(parents=True, exist_ok=True)
+    # 确保 materials 目录存在
+    (data_dir / "materials").mkdir(parents=True, exist_ok=True)
+
     Base.metadata.create_all(bind=engine)
 
     # Ensure default user exists
@@ -64,6 +68,18 @@ def create_app() -> FastAPI:
         if base_path.exists():
             return FileResponse(str(base_path))
         return {"message": "Please create frontend templates"}
+
+    # 应用关闭时将 WAL 完整写入主数据库文件
+    @app.on_event("shutdown")
+    def _checkpoint_wal():
+        import sqlite3
+        db_path = settings.database_url.replace("sqlite:///", "")
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.close()
+        except Exception:
+            pass
 
     return app
 

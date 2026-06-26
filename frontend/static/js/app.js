@@ -4,9 +4,9 @@ const App = {
         courseId: 1,
         userId: 1,
         currentKpId: null,
-        currentMode: 'reading',  // 'reading' | 'chat' | 'quiz'
-        phase: 'idle',
+        currentMode: 'reading',
         roadmap: null,
+        historyLoaded: false,   // 标记聊天历史是否已从数据库加载
     },
 
     async init() {
@@ -20,10 +20,13 @@ const App = {
             window.history.replaceState({}, '', `?session_id=${session.id}`);
         }
 
+        // 将 session_id 存入 localStorage，返回首页再进入时精准恢复
+        localStorage.setItem(`session_${this.state.courseId}`, this.state.sessionId);
+
         await this.loadCourses();
         await this.loadRoadmap();
 
-        // 恢复上次学习的知识点（刷新后保留）
+        // 从数据库恢复上次学习的知识点
         try {
             const sessionData = await API.getSession(this.state.sessionId);
             if (sessionData && sessionData.current_kp_id) {
@@ -33,9 +36,11 @@ const App = {
                 if (title) {
                     document.getElementById('current-concept').textContent = `当前知识点：${title}`;
                 }
+                this.loadKpContent(sessionData.current_kp_id);
             }
         } catch (e) { /* ignore */ }
 
+        // 从数据库加载聊天历史
         await this.loadChatHistory();
 
         document.getElementById('mode-read-btn').addEventListener('click', () => this.switchMode('reading'));
@@ -46,6 +51,19 @@ const App = {
         document.getElementById('chat-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendMessage(); }
         });
+        document.getElementById('clear-chat-btn').addEventListener('click', () => this.clearChatHistory());
+    },
+
+    async clearChatHistory() {
+        if (!confirm('确定清空当前课程的全部聊天记录？此操作不可恢复。')) return;
+        try {
+            await fetch(`/api/v1/sessions/${this.state.sessionId}/chat/history`, { method: 'DELETE' });
+            document.getElementById('chat-messages').innerHTML = '';
+            this.state.historyLoaded = false;
+            this.ensureChatReady();
+        } catch (e) {
+            alert('清空失败，请重试。');
+        }
     },
 
     switchMode(mode) {
@@ -55,7 +73,6 @@ const App = {
         const btnMap = { reading: 'mode-read-btn', chat: 'mode-chat-btn', quiz: 'mode-quiz-btn' };
         document.getElementById(btnMap[mode]).classList.add('active');
 
-        // Show/hide panels
         document.getElementById('reading-panel').classList.toggle('hidden', mode !== 'reading');
 
         const qaPanel = document.getElementById('qa-panel');
@@ -74,7 +91,7 @@ const App = {
             chatMessages.classList.remove('hidden');
             chatInputArea.classList.remove('hidden');
             if (quizContainer) quizContainer.classList.add('hidden');
-            if (this.state.currentKpId) this.startChatForConcept(this.state.currentKpId);
+            this.ensureChatReady();
         } else if (mode === 'quiz') {
             chatMessages.classList.add('hidden');
             chatInputArea.classList.add('hidden');
@@ -105,8 +122,16 @@ const App = {
                 item.addEventListener('click', async () => {
                     const courseId = parseInt(item.dataset.courseId);
                     if (courseId === this.state.courseId) return;
-                    const session = await API.createSession(this.state.userId, courseId);
-                    window.location.href = `/app?session_id=${session.id}&course_id=${courseId}`;
+                    let sessionId;
+                    try {
+                        const active = await API.getActiveSession(this.state.userId, courseId);
+                        if (active && active.has_session) sessionId = active.id;
+                    } catch (e) { /* fall through */ }
+                    if (!sessionId) {
+                        const session = await API.createSession(this.state.userId, courseId);
+                        sessionId = session.id;
+                    }
+                    window.location.href = `/app?session_id=${sessionId}&course_id=${courseId}`;
                 });
             });
 
@@ -140,38 +165,43 @@ const App = {
     },
 
     async loadChatHistory() {
-        const data = await API.getChatHistory(this.state.sessionId);
-        if (data.messages) {
-            data.messages.forEach(m => Chat.appendBubble(m.role, m.content));
-        }
-    },
-
-    // === Reading Mode ===
-    async loadKpContent(kpId) {
-        const panel = document.getElementById('kp-content');
-        panel.innerHTML = '<p class="placeholder-text">正在加载...</p>';
         try {
-            const resp = await fetch(`/api/v1/sessions/knowledge-points/${kpId}/content/html`);
-            panel.innerHTML = await resp.text();
+            const data = await API.getChatHistory(this.state.sessionId);
+            const container = document.getElementById('chat-messages');
+            if (data.messages && data.messages.length > 0) {
+                data.messages.forEach(m => Chat.appendBubble(m.role, m.content));
+                this.state.historyLoaded = true;
+            } else {
+                this.state.historyLoaded = false;
+            }
         } catch (e) {
-            panel.innerHTML = '<p class="placeholder-text">无法加载教材内容，请重试。</p>';
+            this.state.historyLoaded = false;
         }
     },
 
-    // === Chat/QA Mode (知识问答) ===
-    async startChatForConcept(kpId) {
+    ensureChatReady() {
+        // 确保聊天区域有内容：有历史显示历史，没历史显示欢迎语
         const container = document.getElementById('chat-messages');
-        // 只有没有历史消息时才显示欢迎语（首次进入该 session 的对话模式）
-        if (container.children.length === 0 || (container.children.length === 1 && container.querySelector('#typing-indicator'))) {
-            // 清除 typing indicator 再显示欢迎语
-            container.innerHTML = '';
-            Chat.appendBubble('assistant', '你好！我是 AI 知识问答助手。请针对当前知识点提问，或者发送化学方程式让我帮你配平。');
+        const realMessages = container.querySelectorAll('.message:not(#typing-indicator)');
+        if (realMessages.length === 0) {
+            const isChemistry = this.isChemistryCourse();
+            const welcome = isChemistry
+                ? '你好！我是 AI 知识问答助手，有什么学习问题可以问我，也可以发送化学方程式让我帮你配平。'
+                : '你好！我是 AI 知识问答助手，有什么学习问题可以问我。';
+            Chat.appendBubble('assistant', welcome);
         }
         // 更新知识点标签
-        const title = this.getKpTitle(kpId);
-        if (title) {
-            document.getElementById('current-concept').textContent = `当前知识点：${title}`;
+        if (this.state.currentKpId) {
+            const title = this.getKpTitle(this.state.currentKpId);
+            if (title) {
+                document.getElementById('current-concept').textContent = `当前知识点：${title}`;
+            }
         }
+    },
+
+    isChemistryCourse() {
+        const title = (this.state.roadmap?.course_title || '').toLowerCase();
+        return title.includes('化学');
     },
 
     getKpTitle(kpId) {
@@ -211,7 +241,7 @@ const App = {
 
     handleChatResponse(resp) {
         Chat.appendBubble('assistant', resp.reply);
-
+        this.state.historyLoaded = true;
         if (resp.current_kp) {
             document.getElementById('current-concept').textContent =
                 `当前知识点：${resp.current_kp.title}`;
@@ -228,21 +258,26 @@ const App = {
     async navigateToConcept(kpId) {
         this.state.currentKpId = kpId;
         Roadmap.setActive(kpId);
-
-        // 更新知识点标签
         const title = this.getKpTitle(kpId);
         if (title) {
             document.getElementById('current-concept').textContent = `当前知识点：${title}`;
         }
-
-        // Always load reading content
         await this.loadKpContent(kpId);
-
-        // Act according to current mode
         if (this.state.currentMode === 'chat') {
-            await this.startChatForConcept(kpId);
+            this.ensureChatReady();
         } else if (this.state.currentMode === 'quiz') {
-            await this.startQuizForConcept(kpId);
+            this.startQuizForConcept(kpId);
+        }
+    },
+
+    async loadKpContent(kpId) {
+        const panel = document.getElementById('kp-content');
+        panel.innerHTML = '<p class="placeholder-text">正在加载...</p>';
+        try {
+            const resp = await fetch(`/api/v1/sessions/knowledge-points/${kpId}/content/html`);
+            panel.innerHTML = await resp.text();
+        } catch (e) {
+            panel.innerHTML = '<p class="placeholder-text">无法加载教材内容，请重试。</p>';
         }
     },
 

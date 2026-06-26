@@ -62,6 +62,7 @@ class AdaptiveController:
         for kp_id, data in concept_results.items():
             new_bkt = data["bkt_state"]
             db_state = data["db_state"]
+            p_know_before = db_state.p_know  # 在更新前捕获原始值
 
             db_state.p_know = new_bkt.p_know
             db_state.total_attempts += data["total_count"]
@@ -78,7 +79,7 @@ class AdaptiveController:
             self.sm.save_bkt_state(db_state)
 
             bkt_analysis[str(kp_id)] = {
-                "p_know_before": data["db_state"].p_know if data["total_count"] == 1 else round(data["bkt_state"].p_know - 0.1, 4),
+                "p_know_before": round(p_know_before, 4),
                 "p_know_after": round(new_bkt.p_know, 4),
                 "mastery_status": db_state.mastery_status,
                 "needs_relearn": not passed,

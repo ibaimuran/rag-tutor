@@ -18,6 +18,8 @@ const Quiz = {
     async start(sessionId, kpId) {
         this.container = document.getElementById('quiz-container');
         this.inputArea = document.getElementById('chat-input-area');
+        // 清空旧内容，避免切换知识点时显示上一个知识点的测验
+        this.container.innerHTML = '';
         this.container.classList.remove('hidden');
         if (this.inputArea) this.inputArea.classList.add('hidden');
 
@@ -88,16 +90,19 @@ const Quiz = {
     renderQuestion(question) {
         if (!question) return;
 
+        // Remove old question card
+        const oldCard = document.getElementById('quiz-current-question');
+        if (oldCard) oldCard.remove();
+
         const card = document.createElement('div');
         card.className = 'quiz-question-card';
         card.id = 'quiz-current-question';
 
-        // Progress bar
-        const answered = question.index;
-        const total = question.total;
-        const pct = Math.round(answered / total * 100);
-
-        // Difficulty label
+        const answered = question.index || 0;
+        const total = question.total || 0;
+        const pct = total > 0 ? Math.round(answered / total * 100) : 0;
+        const qText = question.question_text || '';
+        const options = question.options || [];
         const diffLabels = {1: '基础', 2: '中等', 3: '综合'};
         const diffLabel = diffLabels[question.difficulty] || '';
 
@@ -109,23 +114,20 @@ const Quiz = {
                 <span>第 ${answered + 1} / ${total} 题</span>
                 <span class="quiz-diff-badge">${diffLabel}</span>
             </div>
-            <div class="quiz-question-text">${this.escapeHtml(question.question_text)}</div>
+            <div class="quiz-question-text">${this.escapeHtml(qText)}</div>
             <div class="quiz-options">
-                ${(question.options || []).map(opt => `
-                    <div class="quiz-option" data-option="${opt.label}">
-                        <span class="quiz-option-letter">${opt.label}</span>
-                        <span class="quiz-option-text">${this.escapeHtml(opt.text)}</span>
+                ${options.map(opt => `
+                    <div class="quiz-option" data-option="${this.escapeHtml(opt.label || '')}">
+                        <span class="quiz-option-letter">${this.escapeHtml(opt.label || '')}</span>
+                        <span class="quiz-option-text">${this.escapeHtml(opt.text || '')}</span>
                     </div>
                 `).join('')}
             </div>
             <div class="quiz-feedback" id="quiz-feedback"></div>
         `;
         this.container.appendChild(card);
-
-        // Scroll to card
         card.scrollIntoView({behavior: 'smooth', block: 'center'});
 
-        // Attach option click handlers
         card.querySelectorAll('.quiz-option').forEach(opt => {
             opt.addEventListener('click', () => {
                 if (opt.classList.contains('disabled')) return;
@@ -135,47 +137,35 @@ const Quiz = {
     },
 
     async submitAnswer(answer, card) {
-        // Disable all options
         card.querySelectorAll('.quiz-option').forEach(o => o.classList.add('disabled'));
-
-        // Highlight selected
         const selected = card.querySelector(`.quiz-option[data-option="${answer}"]`);
         if (selected) selected.classList.add('selected');
 
+        const url = `/api/v1/sessions/${App.state.sessionId}/quiz/${this.quizId}/answer?answer=${encodeURIComponent(answer)}`;
         try {
-            const resp = await fetch(
-                `/api/v1/sessions/${App.state.sessionId}/quiz/${this.quizId}/answer?answer=${encodeURIComponent(answer)}`,
-                {method: 'POST'}
-            );
+            const resp = await fetch(url, {method: 'POST'});
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
 
-            // Show feedback if available
-            if (data.feedback) {
-                this.showFeedback(card, data.feedback);
+            if (data.error) {
+                const fb = card.querySelector('#quiz-feedback');
+                if (fb) fb.innerHTML = `<span style="color:var(--red);">${data.error}</span>`;
+                card.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('disabled', 'selected'));
+                return;
             }
 
-            // Update roadmap
-            if (data.p_know_end !== undefined || data.completed) {
-                App.updateRoadmapFromQuiz();
-            }
+            if (data.feedback) this.showFeedback(card, data.feedback);
+            if (data.p_know_end !== undefined || data.completed) App.updateRoadmapFromQuiz();
 
             if (data.completed) {
-                // Show final result after delay
-                setTimeout(() => {
-                    this.showResult(data);
-                }, 1800);
+                setTimeout(() => this.showResult(data), 1800);
             } else if (data.next_question) {
-                // Show next question after delay
-                setTimeout(() => {
-                    this.renderQuestion(data.next_question);
-                }, 1500);
+                setTimeout(() => this.renderQuestion(data.next_question), 1500);
             }
         } catch (e) {
-            console.error('Quiz answer submission failed:', e);
+            console.error('Quiz submit error:', e);
             const fb = card.querySelector('#quiz-feedback');
-            if (fb) {
-                fb.innerHTML = '<span style="color:var(--red);">提交失败，请重试。</span>';
-            }
+            if (fb) fb.innerHTML = '<span style="color:var(--red);">提交失败，请重试。</span>';
             card.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('disabled', 'selected'));
         }
     },
@@ -212,7 +202,12 @@ const Quiz = {
         const resultDiv = document.createElement('div');
         resultDiv.className = 'quiz-result-card';
 
-        const pct = data.p_know_end;
+        const pct = data.p_know_end || 0;
+        const correctCount = data.correct_count || 0;
+        const totalQuestions = data.total_questions || 0;
+        const masteryStatus = data.mastery_status || 'learning';
+        const assessment = data.assessment || '暂无评估';
+
         const statusLabels = {
             mastered: '已掌握 ✓',
             learning: '学习中 ▶',
@@ -223,19 +218,19 @@ const Quiz = {
             learning: 'var(--accent-2)',
             needs_relearn: 'var(--red)',
         };
-        const statusLabel = statusLabels[data.mastery_status] || data.mastery_status;
-        const statusColor = statusColors[data.mastery_status] || 'var(--text)';
+        const statusLabel = statusLabels[masteryStatus] || masteryStatus;
+        const statusColor = statusColors[masteryStatus] || 'var(--text)';
 
-        // Build answer details
         const detailsHtml = (data.details || []).map(d => {
             const cls = d.is_correct ? 'correct' : 'incorrect';
             const icon = d.is_correct ? '✓' : '✗';
-            return `<span class="quiz-dot ${cls}" title="第${d.question_index + 1}题：${d.is_correct ? '正确' : '错误'}">${icon}</span>`;
+            const idx = (d.question_index || 0) + 1;
+            return `<span class="quiz-dot ${cls}" title="第${idx}题：${d.is_correct ? '正确' : '错误'}">${icon}</span>`;
         }).join('');
 
         resultDiv.innerHTML = `
             <div class="quiz-result-header">
-                <div class="quiz-result-icon">${data.mastery_status === 'mastered' ? '🎉' : '📊'}</div>
+                <div class="quiz-result-icon">${masteryStatus === 'mastered' ? '🎉' : '📊'}</div>
                 <h3>测验完成！</h3>
             </div>
             <div class="quiz-result-stats">
@@ -244,7 +239,7 @@ const Quiz = {
                     <span class="quiz-stat-label">掌握概率</span>
                 </div>
                 <div class="quiz-stat">
-                    <span class="quiz-stat-value">${data.correct_count}/${data.total_questions}</span>
+                    <span class="quiz-stat-value">${correctCount}/${totalQuestions}</span>
                     <span class="quiz-stat-label">答对题数</span>
                 </div>
                 <div class="quiz-stat">
@@ -254,7 +249,7 @@ const Quiz = {
             </div>
             <div class="quiz-result-dots">${detailsHtml}</div>
             <div class="quiz-result-assessment">
-                <strong>BKT分析：</strong>${data.assessment}
+                <strong>BKT分析：</strong>${assessment}
             </div>
             <div class="quiz-result-actions">
                 <button class="quiz-btn retry" onclick="Quiz.retry()">重新测验</button>
@@ -263,7 +258,6 @@ const Quiz = {
         this.container.appendChild(resultDiv);
         resultDiv.scrollIntoView({behavior: 'smooth', block: 'center'});
 
-        // Update roadmap
         App.loadRoadmap();
     },
 

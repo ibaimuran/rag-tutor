@@ -19,6 +19,10 @@ const API = {
         return this.post(`/sessions?user_id=${userId}&course_id=${courseId}`);
     },
 
+    getActiveSession(userId = 1, courseId = 1) {
+        return this.get(`/sessions/active?user_id=${userId}&course_id=${courseId}`);
+    },
+
     getSession(id) { return this.get(`/sessions/${id}`); },
     pauseSession(id) { return this.post(`/sessions/${id}/pause`); },
     resumeSession(id) { return this.post(`/sessions/${id}/resume`); },
@@ -35,10 +39,6 @@ const API = {
 
     getRoadmap(sessionId) {
         return this.get(`/sessions/${sessionId}/roadmap`);
-    },
-
-    getRoadmapHtml(sessionId) {
-        return this.get(`/sessions/${sessionId}/roadmap/html`);
     },
 
     generateTest(sessionId, chapterId) {

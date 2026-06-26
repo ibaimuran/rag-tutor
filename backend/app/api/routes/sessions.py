@@ -6,6 +6,48 @@ from ...core.session_manager import SessionManager
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
 
 
+@router.get("/active")
+async def get_active_session(user_id: int = 1, course_id: int = 1, db: DbSession = Depends(get_db)):
+    """Get the best active session for a user+course — 优先返回有聊天记录的 session。"""
+    from ...models import Session as SessionModel, Interaction
+
+    # 查找所有活跃 session，按创建时间倒序
+    sessions = (
+        db.query(SessionModel)
+        .filter_by(user_id=user_id, course_id=course_id, status="active")
+        .order_by(SessionModel.started_at.desc())
+        .all()
+    )
+    if not sessions:
+        return {"has_session": False}
+
+    # 优先返回有聊天记录的 session
+    for s in sessions:
+        has_interactions = db.query(Interaction).filter_by(session_id=s.id).first() is not None
+        if has_interactions:
+            return {
+                "has_session": True,
+                "id": s.id,
+                "user_id": s.user_id,
+                "course_id": s.course_id,
+                "current_kp_id": s.current_kp_id,
+                "status": s.status,
+                "started_at": str(s.started_at),
+            }
+
+    # 都没有记录则返回最新的
+    s = sessions[0]
+    return {
+        "has_session": True,
+        "id": s.id,
+        "user_id": s.user_id,
+        "course_id": s.course_id,
+        "current_kp_id": s.current_kp_id,
+        "status": s.status,
+        "started_at": str(s.started_at),
+    }
+
+
 @router.post("")
 async def create_session(user_id: int = 1, course_id: int = 1, db: DbSession = Depends(get_db)):
     sm = SessionManager(db)

@@ -127,3 +127,5 @@
   border-radius: var(--radius) var(--radius) var(--radius) 0;
   background: rgba(255,255,255,0.02);
 }
+
+.clear-chat-btn:hover { opacity: 0.85; }

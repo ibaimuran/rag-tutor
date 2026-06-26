@@ -46,3 +46,12 @@ async def chat_history(session_id: int, limit: int = 50, db: DbSession = Depends
             for i in reversed(interactions)
         ]
     }
+
+
+@router.delete("/{session_id}/chat/history")
+async def clear_chat_history(session_id: int, db: DbSession = Depends(get_db)):
+    """清空指定 session 的聊天记录。"""
+    from ...models import Interaction
+    db.query(Interaction).filter_by(session_id=session_id).delete()
+    db.commit()
+    return {"status": "cleared"}

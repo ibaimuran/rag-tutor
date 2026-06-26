@@ -66,12 +66,39 @@
 
     async function enterCourse(courseId) {
         try {
-            showProgress('正在创建学习会话...');
             setLoading(true);
-            const sessionResp = await fetch(`/api/v1/sessions?user_id=1&course_id=${courseId}`, {method: 'POST'});
-            const session = await sessionResp.json();
-            if (session.error) { alert('创建学习会话失败：' + session.error); resetState(); return; }
-            window.location.href = `/app?session_id=${session.id}&course_id=${courseId}`;
+            let sessionId = null;
+
+            // 优先从 localStorage 恢复上次使用的 session（精准匹配）
+            const savedId = localStorage.getItem(`session_${courseId}`);
+            if (savedId) {
+                try {
+                    const checkResp = await fetch(`/api/v1/sessions/${savedId}`);
+                    const check = await checkResp.json();
+                    if (check && check.id && check.status === 'active') {
+                        sessionId = parseInt(savedId);
+                    }
+                } catch (e) { /* fall through */ }
+            }
+
+            // 其次查询服务端活跃 session
+            if (!sessionId) {
+                try {
+                    const activeResp = await fetch(`/api/v1/sessions/active?user_id=1&course_id=${courseId}`);
+                    const active = await activeResp.json();
+                    if (active && active.has_session) sessionId = active.id;
+                } catch (e) { /* fall through */ }
+            }
+
+            // 都没有则创建新 session
+            if (!sessionId) {
+                showProgress('正在创建学习会话...');
+                const sessionResp = await fetch(`/api/v1/sessions?user_id=1&course_id=${courseId}`, {method: 'POST'});
+                const session = await sessionResp.json();
+                if (session.error) { alert('创建学习会话失败：' + session.error); resetState(); return; }
+                sessionId = session.id;
+            }
+            window.location.href = `/app?session_id=${sessionId}&course_id=${courseId}`;
         } catch (e) { alert('网络错误，请重试。'); resetState(); }
     }
 
@@ -80,9 +107,12 @@
         try {
             const resp = await fetch(`/api/v1/admin/courses/${courseId}`, {method: 'DELETE'});
             const result = await resp.json();
-            if (result.status === 'deleted') loadCourses();
-            else alert('删除失败');
-        } catch (e) { alert('网络错误'); }
+            if (result.status === 'deleted') {
+                loadCourses();
+            } else {
+                alert('删除失败：' + (result.error || '未知错误'));
+            }
+        } catch (e) { alert('网络错误：' + e.message); }
     }
 
     async function startLearning(topic) {

@@ -1,16 +1,20 @@
 """Course generator: creates complete courses from a topic name using LLM."""
 
+import asyncio
 import json
 import re
 from pathlib import Path
 from sqlalchemy.orm import Session as DbSession
 
 from ..models import Course, Chapter, KnowledgePoint
-from ..config import settings
+from ..config import settings, BASE_DIR
 from ..llm.deepseek_client import deepseek
 from ..llm.prompt_templates import KP_CONTENT_MD_PROMPT
 from ..rag.embedder import Embedder
 from ..rag.vector_store import VectorStore
+
+# 并行生成 MD 内容时的最大并发数
+MAX_CONCURRENT_MD = 8
 
 
 class CourseGenerator:
@@ -63,13 +67,15 @@ class CourseGenerator:
         self.db.refresh(course)
 
         # Step 3: Create chapters and knowledge points + generate MD files
-        base_dir = Path("data") / "materials" / self._safe_filename(course.title)
+        base_dir = BASE_DIR / "data" / "materials" / self._safe_filename(course.title)
         base_dir.mkdir(parents=True, exist_ok=True)
 
         plan_md = self._build_course_plan_md(structure)
         (base_dir / "课程大纲.md").write_text(plan_md, encoding="utf-8")
 
+        # 批量创建所有章节和知识点
         all_kps = []
+        kp_chapter_map = {}
         for ch_data in structure.get("chapters", []):
             chapter = Chapter(
                 course_id=course.id,
@@ -77,22 +83,18 @@ class CourseGenerator:
                 order_index=ch_data.get("order", len(getattr(course, 'chapters', [])) + 1),
             )
             self.db.add(chapter)
-            self.db.commit()
-            self.db.refresh(chapter)
+            self.db.flush()
 
             ch_dir = base_dir / self._safe_filename(chapter.title)
             ch_dir.mkdir(parents=True, exist_ok=True)
 
             for idx, kp_data in enumerate(ch_data.get("knowledge_points", [])):
                 prerequisites = kp_data.get("prerequisites", [])
-                if not isinstance(prerequisites, list):
-                    prerequisites = []
+                if not isinstance(prerequisites, list): prerequisites = []
                 difficulty = kp_data.get("difficulty", 1)
                 if not isinstance(difficulty, int):
-                    try:
-                        difficulty = int(difficulty)
-                    except (ValueError, TypeError):
-                        difficulty = 1
+                    try: difficulty = int(difficulty)
+                    except (ValueError, TypeError): difficulty = 1
                 kp = KnowledgePoint(
                     chapter_id=chapter.id,
                     title=str(kp_data.get("title", "")),
@@ -103,42 +105,55 @@ class CourseGenerator:
                     difficulty=min(max(difficulty, 1), 5),
                 )
                 self.db.add(kp)
-                self.db.commit()
-                self.db.refresh(kp)
                 all_kps.append(kp)
+                kp_chapter_map[kp] = (chapter.title, ch_dir)
 
+        self.db.commit()
+        for kp in all_kps:
+            self.db.refresh(kp)
+
+        kp_count = len(all_kps)
+
+        # 并行生成 MD 教材（8 路并发，不阻塞则可快速返回）
+        sem = asyncio.Semaphore(MAX_CONCURRENT_MD)
+
+        async def _gen_one(kp, ch_title, ch_dir):
+            async with sem:
                 try:
-                    md_content = await self._generate_kp_md_content(
-                        kp.title, chapter.title, course.title, KP_CONTENT_MD_PROMPT
+                    md = await self._generate_kp_md_content(
+                        kp.title, ch_title, course.title, KP_CONTENT_MD_PROMPT
                     )
-                    self._save_kp_markdown(kp, md_content, ch_dir)
-                except Exception:
-                    pass
+                    self._save_kp_markdown(kp, md, ch_dir)
+                except Exception as e:
+                    print(f"[WARN] Skip MD for '{kp.title}': {e}")
 
-        # Step 4: Minimal vector store
+        await asyncio.gather(*[
+            _gen_one(kp, kp_chapter_map[kp][0], kp_chapter_map[kp][1])
+            for kp in all_kps
+        ])
+
+        # 向量嵌入
         try:
             all_chunks = []
             for kp in all_kps:
                 desc = kp.description or ""
                 summary = kp.content_summary or ""
-                text = f"# {kp.title}\n\n{desc}\n\n{summary}"
                 all_chunks.append({
-                    "text": text,
+                    "chunk_id": f"kp_{kp.id}",
+                    "text": f"# {kp.title}\n\n{desc}\n\n{summary}",
                     "metadata": {"source": "generated", "kp_id": kp.id, "chapter_id": kp.chapter_id},
                 })
             if all_chunks:
-                texts = [c["text"] for c in all_chunks]
-                embeddings = self.embedder.embed(texts)
+                embeddings = self.embedder.embed([c["text"] for c in all_chunks])
                 self.vs.add_chunks(course.id, all_chunks, embeddings)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[WARN] Vector store failed: {e}")
 
         return {
             "course_id": course.id,
             "course_title": course.title,
             "chapters_count": len(structure.get("chapters", [])),
-            "knowledge_points_count": len(all_kps),
-            "chunks_ingested": len(all_chunks),
+            "knowledge_points_count": kp_count,
         }
 
     async def _generate_kp_md_content(self, kp_title: str, chapter_title: str,
