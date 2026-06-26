@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session as DbSession
 from ...api.deps import get_db, get_retriever
-from ...core.tutor_agent import TutorAgent
+from ...core.qa_agent import QAAgent
 from ...core.session_manager import SessionManager
 from ...schemas.chat import ChatRequest
 
@@ -16,27 +16,9 @@ async def chat(session_id: int, req: ChatRequest, db: DbSession = Depends(get_db
         return {"error": "Session not found"}
 
     retriever = get_retriever()
-    agent = TutorAgent(db, retriever)
+    agent = QAAgent(db, retriever)
     response = await agent.process_message(session, req.message, req.target_kp_id)
-    result = {
-        "reply": response.reply,
-        "phase": response.phase,
-        "current_kp": response.current_kp,
-        "bkt_update": response.bkt_update,
-        "roadmap_update": response.roadmap_update,
-        "test_ready": response.test_ready,
-        "next_action": response.next_action,
-        "guessed": response.guessed,
-    }
-    if response.answer_feedback:
-        result["answer_feedback"] = {
-            "is_correct": response.answer_feedback.is_correct,
-            "correct_answer": response.answer_feedback.correct_answer,
-            "explanation": response.answer_feedback.explanation,
-            "p_know_before": response.answer_feedback.p_know_before,
-            "p_know_after": response.answer_feedback.p_know_after,
-        }
-    return result
+    return response
 
 
 @router.get("/{session_id}/chat/history")

@@ -322,16 +322,29 @@ async def get_quiz_result(session_id: int, quiz_id: int, db: DbSession = Depends
 
 @router.get("/{session_id}/quiz/current")
 async def get_current_quiz(session_id: int, kp_id: int, db: DbSession = Depends(get_db)):
-    """Get the current in-progress quiz for a knowledge point, or None."""
+    """Get the current quiz for a knowledge point: in-progress first, then last completed."""
+    # 优先返回进行中的测验
     quiz = (
         db.query(QuizAttempt)
         .filter_by(session_id=session_id, knowledge_point_id=kp_id, status="in_progress")
         .first()
     )
-    if not quiz:
-        return {"has_quiz": False}
-    return {"has_quiz": True, "quiz_id": quiz.id, "current_index": quiz.current_index,
-            "total": len(quiz.questions_json or [])}
+    if quiz:
+        return {"has_quiz": True, "quiz_id": quiz.id, "status": "in_progress",
+                "current_index": quiz.current_index, "total": len(quiz.questions_json or [])}
+
+    # 如果没有进行中的，查找最近完成的测验
+    quiz = (
+        db.query(QuizAttempt)
+        .filter_by(session_id=session_id, knowledge_point_id=kp_id, status="completed")
+        .order_by(QuizAttempt.id.desc())
+        .first()
+    )
+    if quiz:
+        return {"has_quiz": True, "quiz_id": quiz.id, "status": "completed",
+                "total": len(quiz.questions_json or [])}
+
+    return {"has_quiz": False}
 
 
 def _format_quiz_start(quiz: QuizAttempt, kp: KnowledgePoint) -> dict:

@@ -8,6 +8,9 @@
 <link rel="stylesheet" href="/static/css/chat.css">
 <link rel="stylesheet" href="/static/css/quiz.css">
 <link rel="stylesheet" href="/static/css/roadmap.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 </head>
 <body>
 <div id="app">
@@ -53,7 +56,7 @@
         <button id="mode-chat-btn" class="mode-tab">对话</button>
         <button id="mode-quiz-btn" class="mode-tab">测验</button>
       </div>
-      <span id="phase-badge" class="badge idle">待命中</span>
+      <span id="phase-badge" class="badge idle" style="display:none">待命中</span>
     </div>
 
     <!-- Reading Mode Panel -->
@@ -68,7 +71,7 @@
       <div id="quiz-container"></div>
       <div id="chat-messages"></div>
       <div id="chat-input-area">
-        <textarea id="chat-input" placeholder="输入你的回答..." rows="2"></textarea>
+        <textarea id="chat-input" placeholder="输入你的问题..." rows="2"></textarea>
         <button id="send-btn">发送</button>
       </div>
     </div>

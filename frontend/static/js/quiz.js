@@ -18,20 +18,34 @@ const Quiz = {
     async start(sessionId, kpId) {
         this.container = document.getElementById('quiz-container');
         this.inputArea = document.getElementById('chat-input-area');
+        this.container.classList.remove('hidden');
+        if (this.inputArea) this.inputArea.classList.add('hidden');
 
-        // Only show loading if we're actually generating new questions
-        // Check for existing quiz first
+        // 检查已有测验记录
         let existingQuiz = null;
         try {
             const check = await fetch(`/api/v1/sessions/${sessionId}/quiz/current?kp_id=${kpId}`);
             existingQuiz = await check.json();
         } catch (e) { /* ignore */ }
 
+        // 如果有已完成的测验，直接显示结果
+        if (existingQuiz && existingQuiz.has_quiz && existingQuiz.status === 'completed') {
+            try {
+                const resp = await fetch(`/api/v1/sessions/${sessionId}/quiz/${existingQuiz.quiz_id}/result`);
+                const data = await resp.json();
+                if (!data.error) {
+                    this.quizId = existingQuiz.quiz_id;
+                    this.totalQuestions = existingQuiz.total;
+                    this.showResult(data);
+                    return;
+                }
+            } catch (e) { /* fall through to start new */ }
+        }
+
+        // 显示加载中
         if (!existingQuiz || !existingQuiz.has_quiz) {
             this.container.innerHTML = '<div class="quiz-loading"><div class="spinner"></div><p>正在生成测验题目...</p></div>';
         }
-        this.container.classList.remove('hidden');
-        if (this.inputArea) this.inputArea.classList.add('hidden');
 
         try {
             const resp = await fetch(`/api/v1/sessions/${sessionId}/quiz/start?kp_id=${kpId}`, {
@@ -46,13 +60,16 @@ const Quiz = {
             this.totalQuestions = data.total_questions;
             this.answeredCount = 0;
 
-            // Show greeting
-            this.showGreeting(data.greeting, data.knowledge_point);
-
-            // Show first question after brief delay
-            setTimeout(() => {
-                this.renderQuestion(data.first_question);
-            }, 1000);
+            // 如果是恢复进行中的测验
+            if (data.question) {
+                this.renderQuestion(data.question);
+            } else {
+                // 新测验
+                this.showGreeting(data.greeting, data.knowledge_point);
+                setTimeout(() => {
+                    this.renderQuestion(data.first_question);
+                }, 1000);
+            }
         } catch (e) {
             this.container.innerHTML = '<p class="quiz-error">无法启动测验，请重试。</p>';
         }
@@ -241,7 +258,6 @@ const Quiz = {
             </div>
             <div class="quiz-result-actions">
                 <button class="quiz-btn retry" onclick="Quiz.retry()">重新测验</button>
-                <button class="quiz-btn continue" onclick="App.advanceToNext()">下一个知识点</button>
             </div>
         `;
         this.container.appendChild(resultDiv);

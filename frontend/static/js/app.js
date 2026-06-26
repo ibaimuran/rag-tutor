@@ -22,6 +22,20 @@ const App = {
 
         await this.loadCourses();
         await this.loadRoadmap();
+
+        // 恢复上次学习的知识点（刷新后保留）
+        try {
+            const sessionData = await API.getSession(this.state.sessionId);
+            if (sessionData && sessionData.current_kp_id) {
+                this.state.currentKpId = sessionData.current_kp_id;
+                Roadmap.setActive(sessionData.current_kp_id);
+                const title = this.getKpTitle(sessionData.current_kp_id);
+                if (title) {
+                    document.getElementById('current-concept').textContent = `当前知识点：${title}`;
+                }
+            }
+        } catch (e) { /* ignore */ }
+
         await this.loadChatHistory();
 
         document.getElementById('mode-read-btn').addEventListener('click', () => this.switchMode('reading'));
@@ -128,7 +142,7 @@ const App = {
     async loadChatHistory() {
         const data = await API.getChatHistory(this.state.sessionId);
         if (data.messages) {
-            data.messages.forEach(m => Chat.appendBubble(m.role, m.content, m));
+            data.messages.forEach(m => Chat.appendBubble(m.role, m.content));
         }
     },
 
@@ -144,18 +158,30 @@ const App = {
         }
     },
 
-    // === Chat/Dialogue Mode (Socratic AI tutor + BKT) ===
+    // === Chat/QA Mode (知识问答) ===
     async startChatForConcept(kpId) {
-        document.getElementById('chat-messages').innerHTML = '';
-        Chat.showTyping();
-        try {
-            const resp = await API.chat(this.state.sessionId, '', kpId);
-            Chat.hideTyping();
-            this.handleChatResponse(resp);
-        } catch (e) {
-            Chat.hideTyping();
-            Chat.appendBubble('assistant', '抱歉，出现了一些问题。请重试。');
+        const container = document.getElementById('chat-messages');
+        // 只有没有历史消息时才显示欢迎语（首次进入该 session 的对话模式）
+        if (container.children.length === 0 || (container.children.length === 1 && container.querySelector('#typing-indicator'))) {
+            // 清除 typing indicator 再显示欢迎语
+            container.innerHTML = '';
+            Chat.appendBubble('assistant', '你好！我是 AI 知识问答助手。请针对当前知识点提问，或者发送化学方程式让我帮你配平。');
         }
+        // 更新知识点标签
+        const title = this.getKpTitle(kpId);
+        if (title) {
+            document.getElementById('current-concept').textContent = `当前知识点：${title}`;
+        }
+    },
+
+    getKpTitle(kpId) {
+        const chapters = this.state.roadmap?.chapters || [];
+        for (const ch of chapters) {
+            for (const kp of ch.knowledge_points) {
+                if (kp.id === kpId) return kp.title;
+            }
+        }
+        return null;
     },
 
     async sendMessage() {
@@ -184,81 +210,12 @@ const App = {
     },
 
     handleChatResponse(resp) {
-        if (resp.answer_feedback) {
-            Chat.appendFeedback(resp.answer_feedback);
-        }
-
-        Chat.appendBubble('assistant', resp.reply, resp);
-        this.updatePhaseBadge(resp.phase);
+        Chat.appendBubble('assistant', resp.reply);
 
         if (resp.current_kp) {
             document.getElementById('current-concept').textContent =
                 `当前知识点：${resp.current_kp.title}`;
         }
-
-        if (resp.bkt_update) {
-            Roadmap.updateNode(resp.bkt_update);
-        }
-
-        if (resp.roadmap_update) {
-            Roadmap.render(resp.roadmap_update);
-            this.updateProgress(resp.roadmap_update.overall_progress);
-        }
-
-        this.handleMasteryAction(resp);
-
-        if (resp.test_ready) {
-            this.showTestButton();
-        }
-    },
-
-    handleMasteryAction(resp) {
-        const indicator = document.getElementById('mastery-indicator');
-        if (!resp.next_action || resp.next_action.action === 'continue') {
-            indicator.classList.add('hidden');
-            return;
-        }
-
-        indicator.classList.remove('hidden', 'success', 'warning');
-
-        if (resp.next_action.action === 'advance') {
-            indicator.classList.add('success');
-            const pct = resp.bkt_update ? Math.round(resp.bkt_update.p_know_after * 100) : 0;
-            indicator.innerHTML = `
-                <span>已掌握！掌握度 ${pct}%</span>
-                <button class="mastery-action-btn advance" id="advance-btn">进入下一个知识点</button>
-            `;
-            document.getElementById('advance-btn').addEventListener('click', () => this.advanceToNext());
-        } else if (resp.next_action.action === 'relearn') {
-            indicator.classList.add('warning');
-            const pct = resp.bkt_update ? Math.round(resp.bkt_update.p_know_after * 100) : 0;
-            indicator.innerHTML = `
-                <span>掌握度不足 ${pct}%，需要重新学习此知识点</span>
-                <button class="mastery-action-btn relearn" id="relearn-btn">重新学习</button>
-            `;
-            document.getElementById('relearn-btn').addEventListener('click', () => this.relearnCurrent());
-        }
-    },
-
-    advanceToNext() {
-        const chapters = this.state.roadmap?.chapters || [];
-        let found = false;
-        for (const ch of chapters) {
-            for (const kp of ch.knowledge_points) {
-                if (found) {
-                    this.navigateToConcept(kp.id);
-                    document.getElementById('mastery-indicator').classList.add('hidden');
-                    return;
-                }
-                if (kp.id === this.state.currentKpId) found = true;
-            }
-        }
-    },
-
-    relearnCurrent() {
-        this.switchMode('reading');
-        document.getElementById('mastery-indicator').classList.add('hidden');
-        if (this.state.currentKpId) this.loadKpContent(this.state.currentKpId);
     },
 
     // === Quiz Mode ===
@@ -271,7 +228,12 @@ const App = {
     async navigateToConcept(kpId) {
         this.state.currentKpId = kpId;
         Roadmap.setActive(kpId);
-        document.getElementById('current-concept').textContent = '选择左侧知识点开始学习';
+
+        // 更新知识点标签
+        const title = this.getKpTitle(kpId);
+        if (title) {
+            document.getElementById('current-concept').textContent = `当前知识点：${title}`;
+        }
 
         // Always load reading content
         await this.loadKpContent(kpId);
@@ -293,15 +255,6 @@ const App = {
                 this.updateProgress(data.overall_progress);
             }
         } catch (e) { /* silent */ }
-    },
-
-    updatePhaseBadge(phase) {
-        const badge = document.getElementById('phase-badge');
-        badge.className = 'badge ' + phase;
-        badge.textContent = {
-            idle: '待命中', diagnosing: '诊断中', teaching: '教学中',
-            mastery_check: '掌握度检验', testing: '测试中', remediating: '补救学习',
-        }[phase] || phase;
     },
 
     showTestButton() {

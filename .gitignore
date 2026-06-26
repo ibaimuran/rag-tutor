@@ -7,7 +7,6 @@ venv/
 *.egg-info/
 
 # 排除文件
-DESIGN.md
 .env
 
 # Docker
